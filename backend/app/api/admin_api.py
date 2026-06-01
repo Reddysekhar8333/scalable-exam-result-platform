@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.result import Result
 from app.services.csv_service import read_csv
+from app.cache.redis_client import redis_client
+
 
 router = APIRouter(
     prefix="/admin",
@@ -18,7 +20,7 @@ router = APIRouter(
 
 
 @router.post("/upload-results")
-async def upload_results( file: UploadFile = File(...), db: Session = Depends(get_db) ):
+async def upload_results(file: UploadFile = File(...),db: Session = Depends(get_db)):
     # ----------------------------------
     # Read CSV
     # ----------------------------------
@@ -41,110 +43,142 @@ async def upload_results( file: UploadFile = File(...), db: Session = Depends(ge
             }
 
     # ----------------------------------
-    # Detect Duplicates Inside CSV
+    # Check Duplicate Hall Tickets
+    # Inside CSV
     # ----------------------------------
-    csv_duplicates = df[
+    duplicate_rows = df[
         df.duplicated(
             subset=["hall_ticket"]
         )
     ]
-
-    if not csv_duplicates.empty:
+    if not duplicate_rows.empty:
         return {
             "status": "failed",
             "message": "Duplicate hall tickets found inside CSV",
-            "duplicates": csv_duplicates[
+            "duplicates": duplicate_rows[
                 "hall_ticket"
             ].tolist()
         }
 
     # ----------------------------------
-    # Load Existing Hall Tickets  =>  ONE QUERY ONLY
+    # Extract Hall Tickets From CSV
     # ----------------------------------
-    existing_hall_tickets = set( row[0] for row in db.query(Result.hall_ticket).all() )
+    csv_hall_tickets = (
+        df["hall_ticket"]
+        .astype(str)
+        .str.strip()
+        .tolist()
+    )
+
+    # ----------------------------------
+    # Query ONLY Relevant Records
+    # ----------------------------------
+    existing_records = (
+        db.query(Result)
+        .filter(
+            Result.hall_ticket.in_(
+                csv_hall_tickets
+            )
+        )
+        .all()
+    )
+
+    # ----------------------------------
+    # Convert Existing Records
+    # To Dictionary
+    # ----------------------------------
+    existing_map = {record.hall_ticket: record for record in existing_records}
 
     # ----------------------------------
     # Statistics
     # ----------------------------------
     inserted = 0
-    duplicates = 0
+    updated = 0
     invalid_records = 0
 
     errors = []
 
     # ----------------------------------
-    # Store Valid Objects Here  =>  Bulk Insert Later
+    # Store New Records For Bulk Insert
     # ----------------------------------
-    results_to_insert = []
+    new_records = []
 
     # ----------------------------------
-    # Process Rows
+    # Store Updates For Bulk Update
+    # ----------------------------------
+    update_mappings = []
+
+    # ----------------------------------
+    # Process CSV
     # ----------------------------------
     for _, row in df.iterrows():
-
         hall_ticket = str(row["hall_ticket"]).strip()
         student_name = str(row["student_name"]).strip()
         grade = str(row["grade"]).strip()
-
         try:
-            marks = int(
-                row["total_marks"]
-            )
+            total_marks = int(row["total_marks"])
         except Exception:
             invalid_records += 1
-            errors.append( f"{hall_ticket}: Invalid marks format" )
+            errors.append(f"{hall_ticket}: Invalid marks format")
             continue
-
         # ----------------------------------
         # Marks Validation
         # ----------------------------------
-        if marks < 0 or marks > 600:
+        if total_marks < 0 or total_marks > 600:
             invalid_records += 1
-            errors.append( f"{hall_ticket}: Invalid marks" )
+            errors.append(f"{hall_ticket}: Invalid marks")
             continue
-
         # ----------------------------------
-        # Duplicate Check
-        #
-        # O(1) Set Lookup
+        # Existing Record UPDATE
         # ----------------------------------
-        if hall_ticket in existing_hall_tickets:
-            duplicates += 1
-            errors.append(f"{hall_ticket}: Already exists")
-            continue
-
+        if hall_ticket in existing_map:
+            update_mappings.append({
+                "id": existing_map[hall_ticket].id,
+                "student_name": student_name,
+                "grade": grade,
+                "total_marks": total_marks
+            })
+            # Cache Invalidation
+            redis_client.delete(f"result:{hall_ticket}")
+            updated += 1
         # ----------------------------------
-        # Prepare Object
-        #
-        # No DB Insert Yet
+        # New Record INSERT
         # ----------------------------------
-        results_to_insert.append(
-            Result(
-                hall_ticket=hall_ticket,
-                student_name=student_name,
-                grade=grade,
-                total_marks=marks
+        else:
+            new_records.append(
+                Result(
+                    hall_ticket=hall_ticket,
+                    student_name=student_name,
+                    grade=grade,
+                    total_marks=total_marks
+                )
             )
-        )
-
-        inserted += 1
+            inserted += 1
 
     # ----------------------------------
     # Bulk Insert
     # ----------------------------------
-    if results_to_insert:
-        db.bulk_save_objects(
-            results_to_insert
-        )
-        db.commit()
+    if new_records:
+        db.bulk_save_objects(new_records)
 
     # ----------------------------------
-    # Upload Report
+    # Bulk Update
+    # ----------------------------------
+    if update_mappings:
+        db.bulk_update_mappings(Result, update_mappings)
+
+    # ----------------------------------
+    # Commit Everything
+    # ----------------------------------
+    db.commit()
+
+    # ----------------------------------
+    # Final Report
     # ----------------------------------
     return {
         "status": "success",
         "inserted": inserted,
-        "duplicates": duplicates,
+        "updated": updated,
         "invalid_records": invalid_records,
         "total_processed": len(df),
         "errors": errors

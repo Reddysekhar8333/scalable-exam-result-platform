@@ -37,7 +37,7 @@ def get_result( hall_ticket: str, db: Session = Depends(get_db) ):
     if not result:
         raise HTTPException(
             status_code=404,
-            detail="Result not found"
+            detail="Result not found, please enter a valid hall ticket number"
         )
     response = {
         "hall_ticket": result.hall_ticket,
