@@ -5,6 +5,8 @@ from app.models.result import Result
 from app.api.result_api import router as result_router
 from app.api.admin_api import router as admin_router
 
+from app.cache.redis_client import redis_client
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -21,3 +23,25 @@ def home():
         "message": "Exam Result Platform API Running"
     }
 
+
+# --------------------------------------
+# Redis Cache Test Endpoint
+# --------------------------------------
+@app.get("/redis-test")
+def redis_test():
+    try:
+        redis_client.set(
+            "test",
+            "redis working"
+        )
+        value = redis_client.get(
+            "test"
+        )
+        return {
+            "message": value
+        }
+    except Exception as e:
+
+        return {
+            "error": str(e)
+        }
