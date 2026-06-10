@@ -1,17 +1,18 @@
 version: "3.9"
 services:
-  # MySQL container for the exam results database
-  mysql:
-    image: mysql:8.0
-    container_name: exam-mysql
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
-      MYSQL_DATABASE: ${DB_NAME}
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
+  # (MySQL container for the exam results database) removed for now, we will use AWS RDS instead, but you can uncomment and use it for local development and testing
+  # mysql:
+  #   image: mysql:8.0
+  #   container_name: exam-mysql
+  #   restart: always
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+  #     MYSQL_DATABASE: ${DB_NAME}
+  #   ports:
+  #     - "3307:3306"
+  #   volumes:
+  #     - mysql_data:/var/lib/mysql
+
   # Redis container for caching
   redis:
     image: redis:latest
@@ -26,12 +27,8 @@ services:
     container_name: exam-api
     restart: always
     depends_on:
-      - mysql
       - redis
     ports:
       - "8000:8000"
     env_file:
       - ./backend/.env
-
-volumes:
-  mysql_data:
