@@ -45,3 +45,16 @@ def redis_test():
         return {
             "error": str(e)
         }
+
+# --------------------------------------
+# server info endpoint for load balancing testing
+# --------------------------------------
+import socket
+@app.get("/server-info")
+def server_info():
+    hostname = socket.gethostname()
+    ip_address = socket.gethostbyname(hostname)
+    return {
+        "hostname": hostname,
+        "ip_address": ip_address
+    }
