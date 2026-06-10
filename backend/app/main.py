@@ -30,18 +30,13 @@ def home():
 @app.get("/redis-test")
 def redis_test():
     try:
-        redis_client.set(
-            "test",
-            "redis working"
-        )
-        value = redis_client.get(
-            "test"
-        )
+        redis_client.set("test","redis working")
+        value = redis_client.get("test")
         return {
             "message": value
         }
+    
     except Exception as e:
-
         return {
             "error": str(e)
         }
