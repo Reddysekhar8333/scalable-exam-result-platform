@@ -35,7 +35,6 @@ def redis_test():
         return {
             "message": value
         }
-    
     except Exception as e:
         return {
             "error": str(e)
